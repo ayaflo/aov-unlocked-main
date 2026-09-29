@@ -88,11 +88,7 @@ def get_storage_info():
     return "Bộ nhớ tạm thời (RAM/Tmp)", False
 
 def get_current_image_config():
-    global _memory_image_config
-    if _memory_image_config:
-        return _memory_image_config
-
-    # 1. Thử lấy từ Vercel KV / Upstash Redis nếu có
+    # 1. Quét từ Vercel KV / Upstash Redis nếu có
     kv_url = os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
     kv_token = os.environ.get("KV_REST_API_TOKEN") or os.environ.get("UPSTASH_REDIS_REST_TOKEN")
     if kv_url and kv_token:
@@ -103,40 +99,51 @@ def get_current_image_config():
                 if res:
                     cfg = json.loads(res) if isinstance(res, str) else res
                     if isinstance(cfg, dict) and cfg.get("image_url"):
-                        _memory_image_config = cfg
                         return cfg
         except Exception:
             pass
 
-    # 2. Thử lấy từ file /tmp
+    # 2. Quét từ file /tmp
     tmp_path = "/tmp/image_config.json"
     if os.path.exists(tmp_path):
         try:
             with open(tmp_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
                 if cfg.get("image_url"):
-                    _memory_image_config = cfg
                     return cfg
         except Exception:
             pass
 
-    # 3. Mặc định
-    fallback = {
+    # 3. Quét trực tiếp file image_config.json trong thư mục dự án
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "image_config.json"),
+        os.path.join(os.path.dirname(__file__), "image_config.json"),
+        os.path.join(os.getcwd(), "image_config.json"),
+        "image_config.json"
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    if cfg.get("image_url"):
+                        return cfg
+            except Exception:
+                pass
+
+    # 4. Mặc định
+    return {
         "image_url": DEFAULT_IMAGE_URL,
         "mode": "proxy",
         "updated_at": "Mặc định"
     }
-    _memory_image_config = fallback
-    return fallback
 
 def save_current_image_config(new_url, mode="proxy"):
-    global _memory_image_config
     cfg = {
         "image_url": new_url.strip(),
         "mode": mode,
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
     }
-    _memory_image_config = cfg
 
     # 1. Lưu vào Vercel KV nếu có
     kv_url = os.environ.get("KV_REST_API_URL") or os.environ.get("UPSTASH_REDIS_REST_URL")
@@ -164,36 +171,49 @@ def save_current_image_config(new_url, mode="proxy"):
     return cfg, saved_to_kv
 
 def serve_fixed_image():
-    """Trả về nội dung ảnh cố định theo URL tùy chỉnh đã cấu hình"""
+    """Trả về nội dung ảnh cố định theo URL tùy chỉnh đã cấu hình - CHẶN ĐỨNG TOÀN BỘ CACHE"""
     cfg = get_current_image_config()
     target_url = cfg.get("image_url", DEFAULT_IMAGE_URL)
     mode = cfg.get("mode", "proxy")
 
+    no_cache_headers = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0, s-maxage=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Vercel-CDN-Cache-Control": "no-store",
+        "CDN-Cache-Control": "no-store",
+        "Surrogate-Control": "no-store"
+    }
+
     if mode == "redirect":
         resp = redirect(target_url, code=302)
-        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
+        for k, v in no_cache_headers.items():
+            resp.headers[k] = v
         return resp
 
     try:
         req = urllib.request.Request(target_url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Cache-Control": "no-cache, no-store"
         })
         with urllib.request.urlopen(req, timeout=8) as resp:
             content = resp.read()
             content_type = resp.headers.get("Content-Type", "image/png")
             if len(content) > 4000000:
-                return redirect(target_url, code=302)
+                resp_red = redirect(target_url, code=302)
+                for k, v in no_cache_headers.items():
+                    resp_red.headers[k] = v
+                return resp_red
 
             res = Response(content, mimetype=content_type)
-            res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0"
-            res.headers["Pragma"] = "no-cache"
-            res.headers["Expires"] = "0"
-            res.headers["ETag"] = f'"{hash(target_url)}"'
+            for k, v in no_cache_headers.items():
+                res.headers[k] = v
             return res
     except Exception:
-        return redirect(target_url, code=302)
+        resp = redirect(target_url, code=302)
+        for k, v in no_cache_headers.items():
+            resp.headers[k] = v
+        return resp
 
 def handle_update_image():
     """API cập nhật link ảnh"""
