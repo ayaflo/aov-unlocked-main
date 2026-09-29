@@ -1,13 +1,13 @@
 {
   "functions": {
     "api/index.py": {
-      "includeFiles": "response.json"
+      "includeFiles": ["response.json", "image_config.json"]
     }
   },
   "rewrites": [
     {
       "source": "/(.*)",
-      "destination": "/api/index.py"
+      "destination": "/api/index.py?path=$1"
     }
   ]
 }
