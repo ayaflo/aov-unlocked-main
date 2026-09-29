@@ -170,7 +170,13 @@ def serve_fixed_image():
     mode = cfg.get("mode", "proxy")
 
     if mode == "redirect":
-        return redirect(target_url, code=302)
+        resp = redirect(target_url, code=302)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        resp.headers["Vercel-CDN-Cache-Control"] = "no-store"
+        resp.headers["CDN-Cache-Control"] = "no-store"
+        return resp
 
     try:
         req = urllib.request.Request(target_url, headers={
@@ -183,12 +189,20 @@ def serve_fixed_image():
                 return redirect(target_url, code=302)
 
             res = Response(content, mimetype=content_type)
-            res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            # Chống cache triệt để ở mọi tầng (Trình duyệt, Cloudflare, Vercel Edge CDN, App Mobile)
+            res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0"
             res.headers["Pragma"] = "no-cache"
             res.headers["Expires"] = "0"
+            res.headers["Vercel-CDN-Cache-Control"] = "no-store"
+            res.headers["CDN-Cache-Control"] = "no-store"
+            res.headers["Surrogate-Control"] = "no-store"
             return res
     except Exception:
-        return redirect(target_url, code=302)
+        resp = redirect(target_url, code=302)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, s-maxage=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
 def handle_update_image():
     """API cập nhật link ảnh"""
@@ -452,6 +466,8 @@ def render_image_tool_page():
             </div>
 
             <div id="alertBox" class="alert"></div>
+
+            {'<div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 12px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #6ee7b7; line-height: 1.6;">✅ <b>Đã kết nối Vercel KV:</b> Ảnh được lưu vĩnh viễn trên đám mây toàn cầu. Mọi thay đổi sẽ có hiệu lực tức thì ở tất cả các thiết bị!</div>' if is_kv else '<div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 14px; margin-bottom: 20px; font-size: 13px; color: #fde68a; line-height: 1.6;"><div style="font-weight: 700; color: #fbbf24; margin-bottom: 4px;">⚠️ Chưa kết nối Vercel KV (Lý do bị quay về ảnh cũ):</div>Vì Vercel là Serverless (mỗi request có thể chạy ở 1 container khác nhau), nếu chưa bật KV thì ảnh bạn đổi chỉ lưu tạm trong container hiện tại. Khi thiết bị khác truy cập, Vercel mở container mới sẽ quay về ảnh cũ!<br><br>👉 <b>Cách bật Vercel KV để lưu vĩnh viễn (Miễn phí, 15 giây):</b><br>1. Vào <b>vercel.com</b> &rarr; mở project <b>aov-unlocked-main</b>.<br>2. Bấm tab <b>Storage</b> &rarr; <b>Create Database</b> &rarr; chọn <b>KV (Upstash)</b> &rarr; <b>Connect</b>.<br>3. Xong! Web này sẽ tự động chuyển sang lưu vĩnh viễn vĩnh viễn không mất!</div>'}
 
             <!-- MỤC 1: LINK ẢNH CỐ ĐỊNH -->
             <div class="section">
