@@ -120,18 +120,7 @@ def get_current_image_config():
         except Exception:
             pass
 
-    # 3. Lấy từ file image_config.json trong project
-    for p in [os.path.join(os.path.dirname(__file__), "..", "image_config.json"), "image_config.json"]:
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                    if cfg.get("image_url"):
-                        _memory_image_config = cfg
-                        return cfg
-            except Exception:
-                pass
-
+    # 3. Mặc định
     fallback = {
         "image_url": DEFAULT_IMAGE_URL,
         "mode": "proxy",
@@ -180,11 +169,9 @@ def serve_fixed_image():
     target_url = cfg.get("image_url", DEFAULT_IMAGE_URL)
     mode = cfg.get("mode", "proxy")
 
-    # Nếu người dùng chọn mode redirect
     if mode == "redirect":
         return redirect(target_url, code=302)
 
-    # Chế độ proxy (stream trực tiếp bytes ảnh từ URL tùy chỉnh)
     try:
         req = urllib.request.Request(target_url, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -192,23 +179,19 @@ def serve_fixed_image():
         with urllib.request.urlopen(req, timeout=8) as resp:
             content = resp.read()
             content_type = resp.headers.get("Content-Type", "image/png")
-            
-            # Nếu dung lượng > 4MB (gần mốc 4.5MB của Vercel), tự động chuyển hướng 302 để không bị lỗi
             if len(content) > 4000000:
                 return redirect(target_url, code=302)
 
             res = Response(content, mimetype=content_type)
-            # Ngăn chặn trình duyệt/app cache để khi đổi ảnh mới lập tức nhìn thấy ngay
             res.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             res.headers["Pragma"] = "no-cache"
             res.headers["Expires"] = "0"
             return res
     except Exception:
-        # Nếu proxy gặp lỗi (ví dụ domain đích chặn), chuyển hướng 302
         return redirect(target_url, code=302)
 
 def handle_update_image():
-    """API xử lý cập nhật link ảnh"""
+    """API cập nhật link ảnh"""
     data = get_request_data()
     new_url = data.get("image_url") or data.get("new_image_url") or ""
     mode = data.get("mode", "proxy")
@@ -589,38 +572,48 @@ def render_image_tool_page():
 # ==========================================
 # 3. ROUTING & CATCH-ALL TOÀN DIỆN
 # ==========================================
-def get_requested_path():
-    """Lấy đường dẫn chuẩn xác do Vercel rewrites (?path=$1) hoặc request.path"""
-    p = request.args.get("path")
-    if p is not None:
-        return p.strip("/")
+def get_original_requested_url():
+    """Lấy đúng đường dẫn người dùng gõ vào trình duyệt hoặc app gửi lên"""
+    # 1. Thử lấy từ Vercel system header
+    h_path = request.headers.get("x-invoke-path") or request.headers.get("x-matched-path")
+    if h_path:
+        return h_path.strip("/")
+    # 2. Thử lấy từ REQUEST_URI (WSGI environment)
+    req_uri = request.environ.get("REQUEST_URI") or request.environ.get("RAW_URI")
+    if req_uri:
+        parsed = urllib.parse.urlparse(req_uri)
+        return parsed.path.strip("/")
+    # 3. Thử lấy từ query param nếu có
+    if request.args.get("path"):
+        return request.args.get("path").strip("/")
+    # 4. Fallback request.path
     return request.path.strip("/")
 
 @app.route("/", defaults={"path": ""}, methods=["GET", "POST"])
 @app.route("/<path:path>", methods=["GET", "POST"])
 def catch_all(path=""):
-    resolved = get_requested_path()
+    raw_path = get_original_requested_url()
 
-    # 1. Trả về ảnh cố định (Direct Image URL)
-    if resolved in ["image.png", "image.jpg", "live-image.png", "image"]:
+    # 1. Endpoint xem ảnh cố định (ví dụ: /image.png, /live-image.png, /image.jpg)
+    if any(raw_path.endswith(ext) for ext in ["image.png", "image.jpg", "image.jpeg", "live-image.png", "fixed-image.png"]) or raw_path == "image":
         return serve_fixed_image()
 
-    # 2. Trang web quản lý ảnh cho người dùng
-    if resolved in ["image-tool", "image-manager", "admin-image"]:
+    # 2. Trang web quản lý ảnh
+    if raw_path in ["image-tool", "image-manager", "admin-image", "image-config"]:
         if request.method == "POST":
             return handle_update_image()
         return render_image_tool_page()
 
     # 3. API cập nhật link ảnh
-    if resolved in ["api/update-image", "api/set-image"]:
+    if raw_path in ["api/update-image", "api/set-image"]:
         return handle_update_image()
 
-    # 4. Kiểm tra sức khỏe server (Ping)
-    if resolved == "ping":
+    # 4. Endpoint Ping
+    if raw_path == "ping":
         return "pong", 200
 
-    # 5. Nếu là POST (hoặc đường dẫn là login): Xử lý login server game
-    if request.method == "POST" or resolved == "login":
+    # 5. Nếu là POST (hoặc URL là login): Xử lý login server game
+    if request.method == "POST" or raw_path == "login":
         return handle_login()
 
     # 6. Trang chủ GET /
@@ -632,14 +625,18 @@ def catch_all(path=""):
             "image_manager_web": "/image-tool",
             "fixed_image_url": "/image.png",
             "ping": "/ping"
+        },
+        "debug": {
+            "raw_path": raw_path,
+            "request_path": request.path
         }
     })
 
 # Fallback chống 404
 @app.errorhandler(404)
 def fallback_404(e):
-    resolved = get_requested_path()
-    if resolved in ["image.png", "image.jpg", "live-image.png"]:
+    raw_path = get_original_requested_url()
+    if any(raw_path.endswith(ext) for ext in ["image.png", "image.jpg", "image"]):
         return serve_fixed_image()
     if request.method == "POST":
         return handle_login()
