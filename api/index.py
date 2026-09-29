@@ -628,7 +628,8 @@ def catch_all(path=""):
         },
         "debug": {
             "raw_path": raw_path,
-            "request_path": request.path
+            "request_path": request.path,
+            "headers": dict(request.headers)
         }
     })
 
