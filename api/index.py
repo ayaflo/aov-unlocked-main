@@ -77,7 +77,7 @@ def handle_login():
 # ==========================================
 # 2. XỬ LÝ LƯU TRỮ VÀ SERVE LINK ẢNH CỐ ĐỊNH
 # ==========================================
-DEFAULT_IMAGE_URL = "https://file.garden/aognKpREzxs2p7-O/8a2b2282da4df0566491747ed6c1d316.jpg"
+DEFAULT_IMAGE_URL = "https://file.garden/aognKpREzxs2p7-O/2d2c1990990a9ba1c4901b9490c2f1db.jpg"
 _memory_image_config = None
 
 def get_storage_info():
