@@ -54,7 +54,7 @@ def handle_login():
     data = get_request_data()
 
     # Kiểm tra key auth
-    if data.get("auth") not in ["anhtandeptrai", "tan"]:
+    if data.get("auth") not in ["anhtandeptrai2", "tan"]:
         return jsonify({
             "ketqua": "error",
             "mes": "Key không tồn tại"
