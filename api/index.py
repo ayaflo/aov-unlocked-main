@@ -54,8 +54,8 @@ def handle_login():
     data = get_request_data()
 
     # Kiểm tra key auth:
-    if data.get("auth") != "anhtandeptrai":
-        return jsonify({"ketqua": "error", "mes": "Key không tồn tại"}), 401
+    #if data.get("auth") != "anhtandeptrai":
+    #    return jsonify({"ketqua": "error", "mes": "Key không tồn tại"}), 401
 
     raw_bytes, gzip_bytes = get_response_data()
     if raw_bytes is None:
